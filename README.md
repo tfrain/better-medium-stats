@@ -1,51 +1,51 @@
-# Better Medium Stats
+# Medium Stats Insights
 
-Get it at [Chrome Web Store](https://chrome.google.com/webstore/detail/better-medium-stats/pdehepohihkkmeclfnlnipieffkomajc)!
+Medium Stats Insights is a chrome extension that help writers on Medium get more insights from the stats. You can add it to your chrome via [this link](https://chromewebstore.google.com/detail/medium-stats-insights/ajgkoiodkljabcgempdllhgkglaiipjb).
 
-![summary-overview](https://i.imgur.com/czkS3Fi.png)
+## Usage
 
-## What is Better Medium Stats?
+1. Step 1: Log in to your Medium account
+2. Step 2: Click the icon
+3. Step 3: Get the stats!
 
-Better Medium Stats is a chrome extension that help writers on Medium get more insights from the stats. You can add it to your chrome via [this link](https://chrome.google.com/webstore/detail/medium-stats-counter/pdehepohihkkmeclfnlnipieffkomajc).
+<!-- [![Alt text](https://img.youtube.com/vi/3B9HGQiMOgM/0.jpg)](https://www.youtube.com/watch?v=3B9HGQiMOgM) -->
 
 ## Features
 
--  A quick summary contains total views, total followers, last 24 hours/ 7 days/ 30 days views
+-  A summary contains total views, total followers, total earnings, last 24 hours/ 7 days/ 30 days views
 -  Views of all articles in 4 different timespans: year, month, week, date, hour
--  Sort your articles by different metrics
--  Last 30 days new followers trend
--  Export and download stats as csv file
+-  Sort your TOP 5 articles by different metrics such as views, reads, r/v, earnings
+-  Last 30 days new followers(No cancellation included) trend
 
-### Summary
+![show](./img/medium.gif)
 
-![summary](https://i.imgur.com/I2dhxOO.png)
+### Summary Stats
 
-### Hour Views
+![summary](./img/summary.jpg)
 
-![hour-views](https://i.imgur.com/9XYpLo6.png)
+### Views Stats
 
-### Day Views
-
-![day-views](https://i.imgur.com/ws50WGE.png)
+![day-views](./img/views.jpg)
 
 ### Stories Stats
 
-![stories](https://i.imgur.com/HDBkqkI.png)
+![stories](./img/stories.jpg)
 
 ### Follower Trend
 
-![followers](https://i.imgur.com/OMSPQxv.png)
+![followers](./img/followers.jpg)
 
+## Thanks 
 
-
-## Contributing
-
-Any suggestion, issue and PR is highly appreciated. Hope you enjoy it!
-
-
+[better-medium-stats](https://github.com/HcwXd/better-medium-stats)
 
 ## Third Party
 
-- [Feather Open Source Icons](https://github.com/feathericons/feather)
 - [Chart.js](https://www.chartjs.org/)
 
+## Stargazers over time
+[![Stargazers over time](https://starchart.cc/tfrain/medium-stats-insights.svg?variant=adaptive)](https://starchart.cc/tfrain/medium-stats-insights)
+
+## Buy Me a Coffee
+
+[![](./img/buymecoffee.jpg)](https://ko-fi.com/programmerscareer)

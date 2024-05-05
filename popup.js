@@ -1,8 +1,9 @@
 'use strict';
-let articlesMeta;
+// let articlesMeta;
 document.querySelector('.version').innerHTML = 'v' + chrome.runtime.getManifest().version;
 
 /** Nav Bar */
+
 const nav_items = document.querySelectorAll('.nav_item');
 nav_items.forEach((el) => el.addEventListener('click', handleChangeTab));
 
@@ -14,7 +15,6 @@ function handleChangeTab() {
     } else {
       el.classList.add('nav_item-active');
       document.querySelector(`#${el.dataset.name}_container`).style.display = 'flex';
-      ga('send', 'event', 'Navbar', 'click', el.dataset.name);
     }
   });
 }
@@ -31,12 +31,10 @@ function renderUserProfile({ name, username, imageId }, followerCount) {
           >
             <div class="username">${name}</div>
           </a>
-          ${
-            followerCount !== -1
-              ? ` <div class="followers">${followerCount.toLocaleString()} followers</div>`
-              : ''
-          }
-         
+          ${followerCount !== -1
+      ? ` <div class="followers">${followerCount.toLocaleString()} followers</div>`
+      : ''
+    }
         </div>
         <div class="avatar_wrap">
           <img
@@ -53,126 +51,120 @@ function renderUserProfile({ name, username, imageId }, followerCount) {
           >
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-bar-chart-2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>          </a>
         </div>
-       
         `;
 }
 
 /** Summary Page */
+
 let isReadyToRenderSummaryPage = false;
 let storiesData;
+let loadedArticles = 0;
+let totalArticles;
 let errorLog = { hasSummary: false, hasFollower: false };
 
 (async () => {
-  const summaryStatsRawResponse = await fetch(MEDIUM_SUMMARY_STATS_URL);
-  const summaryStatsTextResponse = await summaryStatsRawResponse.text();
-  const data = parseMediumResponse(summaryStatsTextResponse);
-  const storyRawData = data && data.payload && data.payload.value;
+  // 1. user info
+  const userStatsRawResponse = await fetch(MEDIUM_SUMMARY_STATS_URL);
+  const userStatsTextResponse = await userStatsRawResponse.text();
+  const userData = parseMediumResponse(userStatsTextResponse);
   const users =
-    (data && data.payload && data.payload.references && data.payload.references.User) || {};
-  const { username, name, imageId } = Object.values(users)[0] || {};
-  const userMeta = { username, name, imageId };
+    (userData && userData.payload && userData.payload.references && userData.payload.references.User) || {};
+  const { username, name, imageId, userId } = Object.values(users)[0] || {};
+  const userMeta = { username, name, imageId, userId };
+  totalArticles = (userData && userData.payload && userData.payload.userPostCounts && userData.payload.userPostCounts.approvedOrSubmittedPosts) || {};
 
-  let payload = data.payload;
+  const socialStats =
+    (userData && userData.payload && userData.payload.references && userData.payload.references.SocialStats) || {};
+  const usersFollowedByCount = Object.values(socialStats)[0].usersFollowedByCount;
+  errorLog.hasFollower = true;
+
+  // 2. story info
+  const storyData = await handleUserLifetimeStoryStatsPostsQueryFirst(username)
+  const storyRawData = (storyData && storyData.user && storyData.user.postsConnection && storyData.user.postsConnection.edges) || {};
+
+  let postsConnection = storyData.user.postsConnection;
   while (
-    payload &&
-    payload.paging &&
-    payload.paging.next &&
-    payload.paging.next.to &&
-    payload.value &&
-    payload.value.length
+    postsConnection &&
+    postsConnection.pageInfo &&
+    postsConnection.pageInfo.hasNextPage
   ) {
-    const nextUrl = `${MEDIUM_SUMMARY_STATS_URL}&to=${payload.paging.next.to}`;
-    const nextSummaryStatsRawResponse = await fetch(nextUrl);
-    const nextSummaryStatsTextResponse = await nextSummaryStatsRawResponse.text();
-    const nextData = parseMediumResponse(nextSummaryStatsTextResponse);
-    const nextStoryRawData = nextData && nextData.payload && nextData.payload.value;
+    var endCursorObj = JSON.parse(postsConnection.pageInfo.endCursor);
+    const nextStoryRawResponse = await handleUserLifetimeStoryStatsPostsQuery(username, userId, endCursorObj.firstPublishedAt.N, endCursorObj.postId.S);
+
+    const nextStoryRawData = nextStoryRawResponse && nextStoryRawResponse.user && nextStoryRawResponse.user.postsConnection && nextStoryRawResponse.user.postsConnection.edges;
     storyRawData.push(...nextStoryRawData);
-    payload = nextData.payload;
+
+    postsConnection = nextStoryRawResponse.user.postsConnection;
+    articleLoaded()
   }
 
   const storyTableData = {
     totalViews: getTotal(storyRawData, 'views'),
     totalReads: getTotal(storyRawData, 'reads'),
-    totalClaps: getTotal(storyRawData, 'claps'),
-    totalUpvotes: getTotal(storyRawData, 'upvotes'),
+    totalEarnings: getTotal(storyRawData, 'earnings'),
     totalStories: storyRawData.length,
   };
+  function getTotal(arr, action) {
+    return arr.reduce((sum, el) => {
+      if (action == 'views' || action == 'reads') {
+        return sum + el.node.totalStats[action];
+      }
+      return sum + el.node.earnings.total.units + el.node.earnings.total.nanos / 1e9;
+    }, 0);
+  }
+  console.log(storyTableData)
 
-  storiesData = storyRawData.slice();
+  let storyRawDatas = storyRawData.slice();
+  storiesData = storyRawDatas.map(item => item.node)
 
   errorLog.hasSummary = true;
   errorLog.name = username;
   errorLog.view = storyTableData.totalViews;
   errorLog.stories = storyTableData.totalStories;
 
-  const followersStatsRawResponse = await fetch(MEDIUM_FOLLOWERS_STATS_URL(username));
-  const followersStatsTextResponse = await followersStatsRawResponse.text();
-  const followerCount = parseMediumFollowerResponse(followersStatsTextResponse);
-  errorLog.hasFollower = true;
-
-  articlesMeta = storiesData
-    .map(({ postId, slug, title, firstPublishedAt }) => {
-      return JSON.stringify({
-        postId,
-        slug,
-        title,
-        firstPublishedAt,
-        link: `https://medium.com/@${username}/${slug}-${postId}`,
-      });
-    })
-    .join(',');
-
-  ga('send', 'event', 'Login', `${errorLog.name} ${errorLog.stories} ${errorLog.view}`);
-  renderUserProfile(userMeta, followerCount);
-  renderSummaryData({ followerCount, ...storyTableData });
+  renderUserProfile(userMeta, usersFollowedByCount);
+  renderSummaryData({ usersFollowedByCount, ...storyTableData });
   renderStoryData();
 
-  function getTotal(arr, type) {
-    return arr.reduce((sum, el) => {
-      return sum + el[type];
-    }, 0);
-  }
   function renderStoryData() {
-    handleStoriesDownload();
     renderStoriesHandler('views');
   }
 
   function renderSummaryData({
-    followerCount,
+    usersFollowedByCount,
     totalViews,
     totalReads,
-    totalClaps,
-    totalUpvotes,
+    totalEarnings,
     totalStories,
   }) {
     document.querySelector('.total_views').innerHTML = totalViews.toLocaleString();
-    if (followerCount !== -1)
-      document.querySelector('.total_followers').innerHTML = followerCount.toLocaleString();
+    if (usersFollowedByCount && usersFollowedByCount !== -1)
+      document.querySelector('.total_followers').innerHTML = usersFollowedByCount.toLocaleString();
     else document.querySelector('#follower_count').remove();
 
     const html = `<table>
                       <thead>
                         <tr>
                           <th></th>
-                          <th>Stories</th>
+                          <th>Fans</th>
                           <th>Views</th>
                           <th>Reads</th>
                           <th>R/V</th>
-                          <th>Claps</th>
-                          <th>Fans</th>
-                          <th>C/F</th>
+                          <th>Stories</th>
+                          <th>Earnings</th>
+                          <th>E/S</th>
                         </tr>
                       <thead>
                       <tbody>
                         <tr>
                           <td>Total</td>
-                          <td>${numFormater(totalStories)}</td>
+                          <td>${numFormater(usersFollowedByCount)}</td>
                           <td>${numFormater(totalViews)}</td>
                           <td>${numFormater(totalReads)}</td>
                           <td>${toPercentage(totalReads, totalViews)}</td>
-                          <td>${numFormater(totalClaps)}</td>
-                          <td>${numFormater(totalUpvotes)}</td>
-                          <td>${numFormater((totalClaps / totalUpvotes).toFixed(1))}</td>
+                          <td>${numFormater(totalStories)}</td>
+                          <td>$${numFormater(totalEarnings).toFixed(1)}</td>
+                          <td>$${numFormater((totalEarnings / totalStories).toFixed(1))}</td>
                         </tr>
                       </tbody>
                     <table/>
@@ -180,13 +172,14 @@ let errorLog = { hasSummary: false, hasFollower: false };
 
     document.querySelector('.summary_table').innerHTML = html;
     if (isReadyToRenderSummaryPage) {
-      document.querySelector('#summary_loader').style.display = 'none';
+      document.querySelector('#progress-bar').style.display = 'none';
       document.querySelector('.summary_wrap').style.display = 'flex';
     } else {
       isReadyToRenderSummaryPage = true;
     }
   }
 })().catch((err) => {
+  console.error(errorLog);
   console.error(err);
 });
 
@@ -209,7 +202,6 @@ let alignHourOffset = 0;
 const timeFormatBtnWrap = document.querySelector('.time_format_btn_wrap');
 timeFormatBtnWrap.addEventListener('click', function (e) {
   if (e.target.classList.contains('format_btn-select')) return;
-
   for (let child of this.children) {
     if (child !== e.target) {
       child.classList.remove('format_btn-select');
@@ -217,8 +209,7 @@ timeFormatBtnWrap.addEventListener('click', function (e) {
       child.classList.add('format_btn-select');
     }
   }
-  ga('send', 'event', 'ViewBar', 'click', e.target.dataset.timeformat);
-  changeTimeFormatState(e.target.dataset.timeformat);
+  changeTimeFormatState(e.target.dataset.timeformat); // data-timeformat
 });
 
 function changeTimeFormatState(newTimeFormat) {
@@ -300,9 +291,8 @@ const renderHandler = {
         break;
       }
       let [timeStamp, views] = hourViews[hourIdx + idx];
-      let label = `${23 - idx}:00 - ${23 - idx + 1}:00 (${
-        timeStamp.getMonth() + 1
-      }/${timeStamp.getDate()})`;
+      let label = `${23 - idx}:00 - ${23 - idx + 1}:00 (${timeStamp.getMonth() + 1
+        }/${timeStamp.getDate()})`;
       labels.push(label);
       data.push(views);
     }
@@ -401,8 +391,8 @@ function renderViewsChart(labels, data, timeStamp) {
       datasets: [
         {
           label: 'Views',
-          borderColor: '#6eb799',
-          backgroundColor: 'rgba(104, 172, 144, 0.9)',
+          borderColor: '#6e72b7',
+          backgroundColor: 'rgba(80, 141, 162, 0.9)',
           data: data,
         },
       ],
@@ -453,7 +443,7 @@ function displayViewsPage() {
   function fetchStoriesStatsByMonth(fromTime, monthIdx) {
     if (zeroViewCounter > 3 || monthIdx === NUMBER_OF_MONTH_FETCHED - 1) {
       isFinishFetch = true;
-      handleViewsDownload();
+      // handleViewsDownload();
       if (hourViews.length - alignHourOffset < 24 * 30) {
         renderViewsMetrics();
       }
@@ -473,6 +463,8 @@ function displayViewsPage() {
         const { value: rawData } = data.payload;
         let isZeroView = true;
 
+        console.log(rawData.length)
+        console.log(rawData)
         for (let idx = rawData.length - 1; idx >= 0; idx--) {
           let hourlyData = rawData[idx];
           if (hourlyData.views > 0 && isZeroView) isZeroView = false;
@@ -482,6 +474,9 @@ function displayViewsPage() {
           while (lastTimeStamp && getHourDiff(timeStamp, lastTimeStamp) > 1) {
             lastTimeStamp = lastTimeStamp.addTime('Hours', -1);
             hourViews.push([lastTimeStamp, 0]);
+            if (hourViews.length - alignHourOffset === 24 * 30) {
+              renderViewsMetrics();
+            }
           }
 
           hourViews.push([timeStamp, hourlyData.views]);
@@ -519,123 +514,6 @@ function displayViewsPage() {
   }
 }
 
-/** Stories Page */
-const stories_format_btn_wrap = document.querySelector('.stories_format_btn_wrap');
-stories_format_btn_wrap.addEventListener('click', function (e) {
-  if (e.target.classList.contains('format_btn-select')) return;
-
-  for (let child of this.children) {
-    if (child !== e.target) {
-      child.classList.remove('format_btn-select');
-    } else {
-      child.classList.add('format_btn-select');
-    }
-  }
-  renderStoriesHandler(e.target.dataset.storiesformat);
-});
-
-const renderStoriesHandler = (format) => {
-  let stories;
-  if (format === 'r/v') {
-    stories = storiesData.map(({ title, reads, views }) => {
-      return {
-        title,
-        [format]: reads / views,
-      };
-    });
-  } else if (format === 'c/f') {
-    stories = storiesData.map(({ title, claps, upvotes }) => {
-      return {
-        title,
-        [format]: claps / upvotes,
-      };
-    });
-  } else {
-    stories = storiesData.map((story) => {
-      return {
-        title: story.title,
-        [format]: story[format],
-      };
-    });
-  }
-  stories.sort((a, b) => (a[format] > b[format] ? -1 : a[format] == b[format] ? 0 : 1));
-
-  const labels = stories.slice(0, 5).map(({ title }) => title);
-  const data = stories.slice(0, 5).map((story) => story[format]);
-
-  if (format === 'upvotes') format = 'fans';
-  renderStoriesChart(labels, data, format);
-};
-
-const storiesCtx = document.getElementById('storiesChart').getContext('2d');
-let storiesChart;
-
-function renderStoriesChart(labels, data, format) {
-  document.getElementById('storiesChart').style.display = 'block';
-  document.querySelector('#stories_loader').style.display = 'none';
-  if (storiesChart) {
-    storiesChart.data.datasets[0].data = data;
-    storiesChart.data.datasets[0].label = format;
-    storiesChart.data.labels = labels;
-    storiesChart.options.title.text = '';
-    storiesChart.update();
-    return;
-  }
-  storiesChart = new Chart(storiesCtx, {
-    type: 'horizontalBar',
-    data: {
-      labels: labels,
-      datasets: [
-        {
-          label: format,
-          borderColor: '#6eb799',
-          backgroundColor: 'rgba(104, 172, 144, 0.9)',
-          data: data,
-        },
-      ],
-    },
-
-    options: {
-      legend: {
-        display: false,
-      },
-      title: {
-        display: true,
-        text: '',
-        position: 'bottom',
-      },
-      tooltips: {
-        displayColors: false,
-        callbacks: {
-          title: (tooltipItem, data) => data.labels[tooltipItem[0].index],
-          label: (tooltipItem, data) =>
-            `${data.datasets[0].label}: ${data.datasets[0].data[
-              tooltipItem.index
-            ].toLocaleString()}`,
-        },
-      },
-
-      scales: {
-        xAxes: [
-          {
-            ticks: {
-              beginAtZero: true,
-              callback: (t) => numFormater(t),
-            },
-          },
-        ],
-        yAxes: [
-          {
-            ticks: {
-              callback: (value) => trimString(value, 12),
-            },
-          },
-        ],
-      },
-    },
-  });
-}
-
 const renderViewsMetrics = () => {
   let daySum = 0;
   let weekSum = 0;
@@ -654,7 +532,8 @@ const renderViewsMetrics = () => {
   document.querySelector('.week_views').innerHTML = numFormater(weekSum);
   document.querySelector('.month_views').innerHTML = numFormater(monthSum);
   if (isReadyToRenderSummaryPage) {
-    document.querySelector('#summary_loader').style.display = 'none';
+    // document.querySelector('#summary_loader').style.display = 'none';
+    document.querySelector('#progress-bar').style.display = 'none';
     document.querySelector('.summary_wrap').style.display = 'flex';
   } else {
     isReadyToRenderSummaryPage = true;
@@ -664,6 +543,7 @@ const renderViewsMetrics = () => {
 const views_download = document.querySelector('.views_download');
 const views_download_loader = document.querySelector('.views_download_loader');
 const views_download_wrap = document.querySelector('.views_download_wrap');
+
 function handleViewsDownload() {
   exportViewsToCsv();
   views_download.style.display = 'block';
@@ -699,158 +579,22 @@ function exportViewsToCsv() {
     `Medium-Stats-Counter-Views-${getDateKeyFromEpoch(NOW.epoch)}.csv`
   );
   views_download_wrap.addEventListener('click', () => {
-    ga('send', 'event', 'Download', 'click', 'views');
   });
 }
 
-const stories_download = document.querySelector('.stories_download');
-const stories_download_loader = document.querySelector('.stories_download_loader');
-const stories_download_wrap = document.querySelector('.stories_download_wrap');
+function updateProgressBar() {
+  let percentage = (loadedArticles / totalArticles) * 100;
 
-function handleStoriesDownload() {
-  exportstoriesToCsv();
-  stories_download.style.display = 'block';
-  stories_download_loader.style.display = 'none';
+  let progressBar = document.getElementById('progress');
+  progressBar.style.width = percentage + '%';
+  progressBar.innerHTML = `${loadedArticles}/${totalArticles}`;
+
+  let storiesProgressBar = document.getElementById('stories-progress');
+  storiesProgressBar.style.width = percentage + '%';
+  storiesProgressBar.innerHTML = `${loadedArticles}/${totalArticles}`;
 }
 
-function exportstoriesToCsv() {
-  let csvArray = [['Title', 'Views', 'Reads', 'R/V', 'Claps', 'Fans', 'C/F', 'Date']];
-  storiesData.forEach(({ title, views, reads, claps, upvotes, createdAt }) => {
-    csvArray.push([
-      title,
-      views,
-      reads,
-      views > 0 ? (reads / views).toFixed(2) : 0,
-      claps,
-      upvotes,
-      upvotes > 0 ? (claps / upvotes).toFixed(2) : 0,
-      getDetailedDateLabelFromEpoch(new Date(createdAt)),
-    ]);
-  });
-
-  const csvString = getCsvString(csvArray);
-  stories_download_wrap.setAttribute(
-    'href',
-    'data:text/csv;charset=utf-8,' + encodeURIComponent(csvString)
-  );
-  stories_download_wrap.setAttribute(
-    'download',
-    `Medium-Stats-Counter-Stories${getDateKeyFromEpoch(NOW.epoch)}.csv`
-  );
-  stories_download_wrap.addEventListener('click', () => {
-    ga('send', 'event', 'Download', 'click', 'stories');
-  });
-}
-
-/** Followers Page */
-
-const followersCtx = document.getElementById('followersChart').getContext('2d');
-let followersChart;
-
-let last30DaysStats = createLast30DaysObject();
-
-fetchNextNoti({ to: -1 });
-
-function createLast30DaysObject() {
-  let obj = {};
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  const date = today.getDate();
-  for (let i = 0; i <= 30; i++) {
-    const day = new Date(year, month - 1, date + i);
-    const key = getDateKeyFromEpoch(day);
-    obj[key] = {
-      follow: { count: 0, followers: [] },
-      highlight: { count: 0, posts: [] },
-      clap: { count: 0, posts: [] },
-    };
-  }
-  return obj;
-}
-
-function fetchNextNoti({ to }) {
-  const fetchUrl = to === -1 ? MEDIUM_NOTI_STATS_URL : `${MEDIUM_NOTI_STATS_URL}&to=${to}`;
-  const isRollup = (type) => type.slice(type.length - 6, type.length) === 'rollup';
-
-  fetch(fetchUrl)
-    .then((response) => response.text())
-    .then((response) => {
-      const data = parseMediumResponse(response);
-      const { value: notiRawData, paging } = data.payload;
-
-      notiRawData.forEach((notiItem) => {
-        if (isRollup(notiItem.activityType)) {
-          notiItem.rollupItems.forEach((noti) => countSingleNoti(noti));
-        } else {
-          countSingleNoti(notiItem);
-        }
-      });
-
-      if (paging && paging.next) {
-        fetchNextNoti(paging.next);
-      } else {
-        renderFollowersChart();
-      }
-    })
-    .catch((err) => {
-      document.querySelector('#followers_loader').style.display = 'none';
-      console.error(err);
-    });
-}
-
-function countSingleNoti(noti) {
-  const date = new Date(noti.occurredAt);
-  const key = getDateKeyFromEpoch(date);
-  if (last30DaysStats[key] !== undefined) {
-    if (noti.activityType === NOTI_EVENT_TYPE.follow) {
-      last30DaysStats[key].follow.count++;
-      last30DaysStats[key].follow.followers.push(noti.actorId);
-    } else if (noti.activityType === NOTI_EVENT_TYPE.clap) {
-      last30DaysStats[key].clap.count++;
-      last30DaysStats[key].clap.posts.push(noti.postId);
-    } else if (noti.activityType === NOTI_EVENT_TYPE.highlight) {
-      last30DaysStats[key].highlight.count++;
-      last30DaysStats[key].highlight.posts.push(noti.postId);
-    }
-  }
-}
-
-function renderFollowersChart() {
-  document.querySelector('#followers_loader').style.display = 'none';
-  const followersChart = new Chart(followersCtx, {
-    type: 'line',
-    data: {
-      labels: Object.keys(last30DaysStats).map(
-        (key) => `${Math.floor((key % 10000) / 100)}/${key % 100}`
-      ),
-      datasets: [
-        {
-          label: 'Daily followers',
-          borderColor: '#6eb799',
-          data: [...Object.keys(last30DaysStats).map((key) => last30DaysStats[key].follow.count)],
-        },
-      ],
-    },
-    options: {
-      legend: {
-        display: false,
-      },
-      title: {
-        display: true,
-        text: `Last 30 Days Followers: ${Object.keys(last30DaysStats).reduce(
-          (acc, key) => (acc += last30DaysStats[key].follow.count),
-          0
-        )}`,
-        position: 'bottom',
-      },
-      elements: {
-        line: {
-          backgroundColor: 'rgba(0,0,0,0)',
-          pointBackgroundColor: 'rgba(0,0,0,0)',
-          tension: 0,
-        },
-      },
-    },
-  });
+function articleLoaded() {
+  loadedArticles += 10;
+  updateProgressBar();
 }
